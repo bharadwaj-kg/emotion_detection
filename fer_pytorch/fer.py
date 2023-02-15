@@ -1,4 +1,5 @@
 import json
+import time
 import os
 import warnings
 from typing import Any, Dict, List, Optional, Union
@@ -97,9 +98,19 @@ class FER:
 
         result_list = []
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        #Calculating time taken to run face detection model
+        t1=time.time()
 
         boxes, _ = self.mtcnn.detect(frame, landmarks=False)
 
+        t2=time.time()
+        face_det = t2-t1 #time for face detection
+
+        #print("****************Time taken to run FD is :***************" , (t2-t1))
+
+        #calculating time for Emotion detection
+        t3= time.time()
+        prob_limit = 0.9 #0.8,0.9
         if boxes is not None:
             for (x, y, w, h) in boxes:
                 if not all(coordinate >= 0 for coordinate in (x, y, w, h)):
@@ -120,12 +131,18 @@ class FER:
                 probs = torch.nn.functional.softmax(output, dim=1).data.cpu().numpy()
 
                 if show_top:
-                    result_list.append(
-                        {
-                            "box": [x, y, w, h],
-                            "top_emotion": {EMOTION_DICT[probs[0].argmax()]: np.amax(probs[0])},
-                        }
-                    )
+                    #Modification to add only certain frames to the result based on condition.
+                    if (np.amax(probs[0])>prob_limit and EMOTION_DICT[probs[0].argmax()] != 'neutral'):
+                    
+                        result_list.append(
+                            {
+                                "box": [x, y, w, h],
+                                "top_emotion": {EMOTION_DICT[probs[0].argmax()]: np.amax(probs[0])},
+                            }
+                        )
+
+                    else:
+                        pass
                 else:
                     result_list.append(
                         {
@@ -141,12 +158,23 @@ class FER:
                             },
                         }
                     )
-                self.visualize(frame, [x, y, w, h], EMOTION_DICT[probs[0].argmax()], np.amax(probs[0]))
+
+                #Modification to get selected visualization.
+                if (np.amax(probs[0])>prob_limit and EMOTION_DICT[probs[0].argmax()] != 'neutral'):
+                    self.visualize(frame, [x, y, w, h], EMOTION_DICT[probs[0].argmax()], np.amax(probs[0]))
+                else:
+                    pass
         else:
             warnings.warn("No faces detected!")
         if path_to_output is not None:
             cv2.imwrite(path_to_output, frame)
-        return result_list
+
+        t4= time.time()
+        emo_det = t4-t3 #time for face detection
+
+        return result_list, face_det, emo_det
+        
+        
 
     def predict_list_images(
         self, path_to_input: str, path_to_output: str, save_images: bool = False
@@ -200,8 +228,8 @@ class FER:
             f.write(result_json)
 
         return result_list
-
-    def analyze_video(self, path_to_video: str, path_to_output: str, save_video: bool = False, fps: int = 25) -> None:
+    #Changing fps to 30 from 25.
+    def analyze_video(self, path_to_video: str, path_to_output: str, save_video: bool = False, fps: int = 30) -> None:
         """The method makes the prediction of the FER model on a video file.
 
         The method saves the output json file with emotion recognition results for each frame of the input video. The
@@ -231,6 +259,11 @@ class FER:
         v_cap = cv2.VideoCapture(path_to_video)
         v_len = int(v_cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+        #Calculating time taken to run face and emotion detection model
+        time_FD = []
+        time_ED = []
+        #frame_counter=0 #counter to skip frames
+        skip_frequency = 6 #1,3,6,9
         for i in tqdm(range(v_len)):
             success, frame = v_cap.read()
             if not success:
@@ -239,27 +272,47 @@ class FER:
 
             height, width, layers = frame.shape
             size = (width, height)
-
-            output_list = self.predict_image(frame, show_top=True)
+            
             frame_array.append(frame)
+            
+            #skipping frames, tune the skip frequency, frame_id:i
+            if i % skip_frequency == 0:
+                output_list, face_det, emo_det = self.predict_image(frame, show_top=True)
+            
+                time_FD.append(face_det)
+                time_ED.append(emo_det)
 
-            result_dict = {"frame_id": f"{i}"}
-            result_dict = self.preprocess_output_list(output_list, result_dict)
-            result_list.append(result_dict)
+                #Modification to get selected frames.
+                #frame_array.append(frame)
+                if len(output_list)!=0:
+
+                    result_dict = {"frame_id": f"{i}", "time_stamp": round(i/30)}
+                    #result_dict = {"time_stamp": i//30}
+                    result_dict = self.preprocess_output_list(output_list, result_dict)
+                    result_list.append(result_dict)
+
+               #continue
+
+            
+
+        print("Time taken for FD", np.sum(time_FD))
+        print("Time taken for ED", np.sum(time_ED))
 
         result_json = json.dumps(result_list, allow_nan=True, indent=4)
-        path_to_json = os.path.join(path_to_output, "result.json")
+        path_to_json = os.path.join(path_to_output, "result_ts.json")#Changed the name
 
         with open(path_to_json, "w") as f:
             f.write(result_json)
 
         if save_video:
             path_to_video = os.path.join(path_to_output, filename)
-            out = cv2.VideoWriter(path_to_video, cv2.VideoWriter_fourcc(*"DIVX"), fps, size)
+            out = cv2.VideoWriter(path_to_video, cv2.VideoWriter_fourcc(*"H264"), fps, size)#Changed codecc DIVX
             print("Writing the output videofile...")
             for i in tqdm(range(len(frame_array))):
                 out.write(frame_array[i])
             out.release()
+
+        return time_FD, time_ED #to return the list in the output
 
     def run_webcam(self) -> None:
         """The method makes the prediction of the FER model for the stream from the web camera and shows the results in
