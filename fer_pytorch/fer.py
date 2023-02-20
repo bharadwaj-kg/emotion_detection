@@ -306,7 +306,7 @@ class FER:
 
         if save_video:
             path_to_video = os.path.join(path_to_output, filename)
-            out = cv2.VideoWriter(path_to_video, cv2.VideoWriter_fourcc(*"avc1"), fps, size)#Changed codecc DIVX
+            out = cv2.VideoWriter(path_to_video, cv2.VideoWriter_fourcc(*"DIVX"), fps, size)#Changed codecc DIVX
             print("Writing the output videofile...")
             for i in tqdm(range(len(frame_array))):
                 out.write(frame_array[i])
