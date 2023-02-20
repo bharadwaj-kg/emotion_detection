@@ -312,7 +312,7 @@ class FER:
                 out.write(frame_array[i])
             out.release()
 
-        return time_FD, time_ED #to return the list in the output
+        return time_FD, time_ED, path_to_video #to return the list in the output
 
     def run_webcam(self) -> None:
         """The method makes the prediction of the FER model for the stream from the web camera and shows the results in
